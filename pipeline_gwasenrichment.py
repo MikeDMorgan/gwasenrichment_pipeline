@@ -155,9 +155,49 @@ def connect():
 # ---------------------------------------------------#
 # Get the relevant annotations first for enrichments
 # Merge enrichments into a single file if necessary
-@follows(mkdir("bed.dir"))
+@follows(mkdir("cell_types.dir"))
 @collate("%s/*.bed.gz" % PARAMS['bed_files'],
-         regex("%s/(.+)-(.+).bed.gz" % PARAMS['bed_files']),
+         regex("%s/(.+)-(.+)-(.+).bed.gz" % PARAMS['bed_files']),
+         r"cell_types.dir/\1-\2.bed.gz")
+def mergeCellTypeAnnotations(infiles, outfile):
+    '''
+    Use bedtools intersect to get common features
+    for each annotation for a given cell/tissue type
+
+    Expected filename format: <Tissue>-<annotation>-<replicate>.bed.gz
+    Files must be chrom:start sorted
+    '''
+
+    cell_files = " ".join(infiles)
+    job_memory = "8G"
+
+    if len(infiles) == 2:
+        file1 = infiles[0]
+        file2 = infiles[1]
+        statement = '''
+        bedtools intersect -a %(file1)s -b %(file2)s
+        | gzip > %(outfile)s
+        '''
+
+    elif len(infiles) > 2:
+        statement = '''
+        multiIntersectBed -i %(cell_files)s |
+        awk '{if($4 == 3) {print $0}' | gzip
+        > %(outfile)s
+        '''
+
+    else:
+        statement = '''
+        ln -s %(cell_files)s %(outfile)s
+        '''
+
+    P.run()
+
+
+@follows(mkdir("bed.dir"),
+         mergeCellTypeAnnotations)
+@collate("cell_types.dir/*.bed.gz",
+         regex("cell_types.dir/(.+)-(.+).bed.gz"),
          r"bed.dir/\1.bed.gz")
 def mergeBedAnnotations(infiles, outfile):
     '''
@@ -171,17 +211,74 @@ def mergeBedAnnotations(infiles, outfile):
 
     job_memory = "1G"
 
+    if len(infiles) > 1:
+        statement = '''
+        python /ifs/devel/projects/proj045/enrichment_pipeline/merge_beds.py
+        --regex-filename="-(.+).bed.gz"
+        --log=%(outfile)s.log
+        %(all_files)s
+        | gzip > %(outfile)s
+        '''
+
+        P.run()
+    else:
+        statement = '''
+        cp %(all_files)s %(outfile)s
+        '''
+
+        P.run()
+
+
+# assign SNPs to linkage/haplotype blocks in bed format
+# process SNP list for GoShifter
+
+@follows(mkdir("snpsets.dir"))
+@transform("%s/*.tsv" % PARAMS['snpset_dir'],
+           regex("(.+)/(.+).tsv"),
+           add_inputs("%s/*.bim" % PARAMS['snpset_bims']),
+           r"snpsets.dir/\2.snpmap")
+def convertSNPstoSNPset(infiles, outfile):
+    '''
+    Convert a list of SNP IDs to a GoShifter
+    compatible SNP file using position information
+    from Plink .bim files
+    '''
+
+    snp_file = infiles[0]
+    bim_files = ",".join(infiles[1:])
+    job_memory = "12G"
+
     statement = '''
-    python /ifs/devel/projects/proj045/enrichment_pipeline/merge_beds.py
-    --regex-filename="-(.+).bed.gz"
+    python /ifs/devel/projects/proj045/enrichment_pipeline/snps2snpset.py
+    --bim-file=%(bim_files)s
     --log=%(outfile)s.log
-    %(all_files)s
+    %(snp_file)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(convertSNPstoSNPset)
+@transform(convertSNPstoSNPset,
+           suffix(".snpmap"),
+           ".snpset.bed.gz")
+def convertSnpsetToBed(infile, outfile):
+    '''
+    Convert a .snpmap file into a BED4 format
+    file
+    '''
+
+    job_memory = "1G"
+
+    statement = '''
+    cat %(infile)s |
+    awk '{if(NR > 1) {printf("%%s\\t%%s\\t%%s\\t%%s\\n", $2, $3, $3+1, $1)}}'
     | gzip > %(outfile)s
     '''
 
     P.run()
 
-# assign SNPs to linkage/haplotype blocks in bed format
 
 @follows(mkdir("haplotypes.dir"))
 @transform("%s/*.blocks.det" % PARAMS['snpset_haplotypes'],
@@ -232,7 +329,7 @@ def mergeHaplotypeBeds(infiles, outfile):
 @transform("%s/*.tsv" % PARAMS['snpset_dir'],
            regex("(.+)/(.+).tsv"),
            add_inputs(mergeHaplotypeBeds),
-           r"snpsets.dir/\2.snpset.gz")
+           r"snpsets.dir/\2.haplotype.bed.gz")
 def convertSet2Block(infiles, outfile):
     '''
     Convert list of SNP IDs into
@@ -264,8 +361,9 @@ def convertSet2Block(infiles, outfile):
 @follows(convertSet2Block,
          mergeBedAnnotations,
          mkdir("gat.dir"))
-@product(convertSet2Block,
-         formatter("(.snpset.gz)$"),
+@product([convertSet2Block,
+          convertSnpsetToBed],
+         formatter("(.bed.gz)$"),
          mergeBedAnnotations,
          formatter("(.bed.gz$)"),
          "gat.dir/"
@@ -280,8 +378,7 @@ def genomicAsssociationTest(infiles, outfile):
 
     '''
 
-    job_memory = "3G"
-    job_threads = 2
+    job_memory = "10G"
     snpset = infiles[0]
     annotations = infiles[1]
 
@@ -289,17 +386,103 @@ def genomicAsssociationTest(infiles, outfile):
     gat-run.py
     --segments=%(snpset)s
     --annotations=%(annotations)s
-    --workspace=%(gat_mappability)s
     --workspace=%(gat_ungapped)s
+    --workspace=%(gat_mappability)s
     --ignore-segment-tracks
     --num-samples=%(gat_samples)s
-    --num-threads=%(job_threads)s
     --log=%(outfile)s.log
     > %(outfile)s
     '''
 
     P.run()
 
+
+@follows(genomicAsssociationTest)
+@collate(genomicAsssociationTest,
+         regex("gat.dir/(.+)\.(.+).bed_vs_(.+).bed.gat"),
+         r"gat.dir/\1-\2.gat")
+def mergeGatResults(infiles, outfile):
+    '''
+    Merge output from GAT into a single table
+    '''
+
+    job_memory = "1G"
+
+    infiles = " ".join(infiles)
+
+    statement = '''
+    python %(scriptsdir)s/combine_tables.py
+    --columns=2
+    --take=8,9,10,11
+    --add-file-prefix
+    --regex-filename="_vs_(.+).bed.gat"
+    --log=%(outfile)s.log
+    %(infiles)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(convertSNPstoSNPset,
+         mkdir("goshifter.dir"))
+@product(convertSNPstoSNPset,
+         formatter("(.snpmap$)"),
+         "cell_types.dir/*.bed.gz",
+         formatter("(.bed.gz)"),
+         "goshifter.dir/"
+         "{basename[0][0]}_vs_"
+         "{basename[1][0]}.goshift")
+def goShifter(infiles, outfile):
+    '''
+    Test enrichment of overlap between SNP sets
+    and individual annotations using
+    GoShifter.
+    '''
+
+    job_memory = "4G"
+
+    snpset = infiles[0]
+    annotations = infiles[1]
+
+    statement = '''
+    goshifter.py
+    --snpmap %(snpset)s
+    --annotation %(annotations)s
+    --permute %(goshifter_perms)s
+    --ld %(goshifter_ld)s
+    --out %(outfile)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(goShifter)
+@collate(goShifter,
+         regex("goshifter.dir/(.+).snpset_vs_(.+).bed.goshift"),
+         r"goshifter.dir/\1.goshift")
+def mergeGoshifterResults(infiles, outfile):
+    '''
+    Merge output from Goshifter into a single table
+    '''
+
+    job_memory = "1G"
+
+    infiles = " ".join(infiles)
+
+    statement = '''
+    python %(scriptsdir)s/combine_tables.py
+    --columns=2
+    --take=8,9,10,11
+    --add-file-prefix
+    --regex-filename="_vs_(.+).bed.gat"
+    --log=%(outfile)s.log
+    %(infiles)s
+    > %(outfile)s
+    '''
+
+    P.run()
 
 # ---------------------------------------------------
 # Generic pipeline tasks
@@ -308,8 +491,13 @@ def genomicAsssociationTest(infiles, outfile):
 def process_samples():
     pass
 
+@follows(genomicAsssociationTest,
+         goShifter)
+def test_enrichment():
+    pass
 
-@follows()
+@follows(process_samples,
+         test_enrichment)
 def full():
     pass
 
