@@ -440,7 +440,7 @@ def goShifter(infiles, outfile):
     GoShifter.
     '''
 
-    job_memory = "4G"
+    job_memory = "12G"
 
     snpset = infiles[0]
     annotations = infiles[1]

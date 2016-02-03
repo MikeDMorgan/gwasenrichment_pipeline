@@ -150,35 +150,35 @@ TOP_fold <- ggplot(na.omit(TOP.melt[TOP.melt$stat == "fold",]),
   geom_hline(yintercept=1.0, linetype="dashed", colour="white")
 
 
-########################
-# ES weighted LD score #
-########################
-
-SCORE.melt <- melt(Score.gat, varnames="annotation", id.vars="annotation")
-score.cell_type = unlist(lapply(strsplit(as.character(SCORE.melt$variable), fixed=T, split="_"),
-                                function(x) {paste0(x[1])}))
-SCORE.melt$cell_type <- score.cell_type
-score.stat = unlist(lapply(strsplit(as.character(SCORE.melt$variable), fixed=T, split="_"),
-                           function(x) {paste0(x[2])}))
-SCORE.melt$stat <- score.stat
-SCORE.melt$method <- "LDscore"
-SCORE.melt$value <- as.numeric(SCORE.melt$value)
-
-SCORE_qval <- ggplot(na.omit(SCORE.melt[SCORE.melt$stat == "qvalue",]),
-                     aes(x=cell_type, y=-log10(value),
-                         fill=cell_type,
-                         group=reorder(annotation, log10(value)))) + 
-  geom_bar(stat="identity", position="dodge", width=1.0) + theme_dark() + 
-  scale_fill_manual(values=annot_cols(n_cells)) + ylim(c(0, 5)) + labs(x="Cell Type", y="-log10 q-value") + 
-  geom_hline(yintercept=1.5, linetype="dashed", colour="white")
-
-SCORE_fold <- ggplot(na.omit(SCORE.melt[SCORE.melt$stat == "fold",]),
-                     aes(x=cell_type, y=value, 
-                         fill=cell_type,
-                         group=reorder(annotation, -value))) + 
-  geom_bar(stat="identity", position="dodge", width=1.0) + theme_dark() + 
-  scale_fill_manual(values=annot_cols(n_cells)) + labs(x="Cell Type", y="Fold Enrichment") +
-  geom_hline(yintercept=1.0, linetype="dashed", colour="white")
+# ########################
+# # ES weighted LD score #
+# ########################
+# 
+# SCORE.melt <- melt(Score.gat, varnames="annotation", id.vars="annotation")
+# score.cell_type = unlist(lapply(strsplit(as.character(SCORE.melt$variable), fixed=T, split="_"),
+#                                 function(x) {paste0(x[1])}))
+# SCORE.melt$cell_type <- score.cell_type
+# score.stat = unlist(lapply(strsplit(as.character(SCORE.melt$variable), fixed=T, split="_"),
+#                            function(x) {paste0(x[2])}))
+# SCORE.melt$stat <- score.stat
+# SCORE.melt$method <- "LDscore"
+# SCORE.melt$value <- as.numeric(SCORE.melt$value)
+# 
+# SCORE_qval <- ggplot(na.omit(SCORE.melt[SCORE.melt$stat == "qvalue",]),
+#                      aes(x=cell_type, y=-log10(value),
+#                          fill=cell_type,
+#                          group=reorder(annotation, log10(value)))) + 
+#   geom_bar(stat="identity", position="dodge", width=1.0) + theme_dark() + 
+#   scale_fill_manual(values=annot_cols(n_cells)) + ylim(c(0, 5)) + labs(x="Cell Type", y="-log10 q-value") + 
+#   geom_hline(yintercept=1.5, linetype="dashed", colour="white")
+# 
+# SCORE_fold <- ggplot(na.omit(SCORE.melt[SCORE.melt$stat == "fold",]),
+#                      aes(x=cell_type, y=value, 
+#                          fill=cell_type,
+#                          group=reorder(annotation, -value))) + 
+#   geom_bar(stat="identity", position="dodge", width=1.0) + theme_dark() + 
+#   scale_fill_manual(values=annot_cols(n_cells)) + labs(x="Cell Type", y="Fold Enrichment") +
+#   geom_hline(yintercept=1.0, linetype="dashed", colour="white")
 
 
 ################
@@ -251,4 +251,25 @@ p_SELECT <- ggplot(na.omit(SELECT.melt[SELECT.melt$stat == "qvalue",]), aes(x=ce
   labs(x="Functional Annotation grouped by Cell Type", y="-log10(q-value)") + 
   theme(text=element_text(size=18))
 
-ggsave(p_SELECT, filename="GAT-compare_SNP_methods.png", height=14.4, width=18)
+ggsave(p_SELECT, filename="GAT-compare_SNP_methods-Blond_haplotypes.png", height=14.4, width=18)
+
+
+##################################################
+# Plot the log2 fold Enrichments for qval < 0.05 #
+##################################################
+
+select.qval <- na.omit(SELECT.melt[SELECT.melt$stat == "qvalue" & SELECT.melt$value <= 0.01,])
+select.merge <- merge(select.qval, SELECT.melt, by=c("annotation", "cell_type", "SNPset"))
+# Drop RA Gwas enrichments
+select.merge <- select.merge[select.merge$SNPset != "RAgwas",]
+new_cols <- colorRampPalette(brewer.pal(8, "Paired"))
+n_annot <- length(unique(select.merge$cell_type))
+
+ggplot(na.omit(select.merge[select.merge$stat.y == "l2fold",]), 
+       aes(x=annotation, y=value.y, fill=cell_type)) + 
+  geom_bar(stat="identity", position="dodge") + 
+  theme_dark() + geom_hline(yintercept=1.0, linetype="dashed", colour="white") +
+  theme(axis.text.x=element_text(angle=90, vjust=0.7, hjust=0)) +
+  labs(x="Functional Annotation grouped by Cell Type", y="log2 Fold Enrichment") +
+  theme(text=element_text(size=18)) +  
+  scale_fill_manual(values=new_cols(n_annot)) + facet_wrap(~SNPset, scales="free_x")
