@@ -24,7 +24,7 @@
 Pipeline template
 ===========================
 
-:Author: Andreas Heger
+:Author: Mike Morgan
 :Release: $Id$
 :Date: |today|
 :Tags: Python
@@ -234,7 +234,7 @@ def mergeBedAnnotations(infiles, outfile):
 
 @follows(mkdir("snpsets.dir"))
 @transform("%s/*.tsv" % PARAMS['snpset_dir'],
-           regex("(.+)/(.+).tsv"),
+           regex("(.+)/(.+)-goshifter.tsv"),
            add_inputs("%s/*.bim" % PARAMS['snpset_bims']),
            r"snpsets.dir/\2.snpmap")
 def convertSNPstoSNPset(infiles, outfile):
@@ -260,20 +260,27 @@ def convertSNPstoSNPset(infiles, outfile):
 
 
 @follows(convertSNPstoSNPset)
-@transform(convertSNPstoSNPset,
-           suffix(".snpmap"),
-           ".snpset.bed.gz")
-def convertSnpsetToBed(infile, outfile):
+@transform("%s/*.tsv" % PARAMS['snpset_dir'],
+           regex("(.+)/(.+)-gat.tsv"),
+           add_inputs("%s/*.bim" % PARAMS['snpset_bims']),
+           r"snpsets.dir/\2.snpset.bed.gz")
+def convertSnpsetToBed(infiles, outfile):
     '''
-    Convert a .snpmap file into a BED4 format
+    Convert a SNP set file into a BED4 format
     file
     '''
 
-    job_memory = "1G"
+
+    snp_file = infiles[0]
+    bim_files = ",".join(infiles[1:])
+    job_memory = "12G"
 
     statement = '''
-    cat %(infile)s |
-    awk '{if(NR > 1) {printf("%%s\\t%%s\\t%%s\\t%%s\\n", $2, $3, $3+1, $1)}}'
+    python /ifs/devel/projects/proj045/enrichment_pipeline/snps2snpset.py
+    --bim-file=%(bim_files)s
+    --log=%(outfile)s.log
+    %(snp_file)s
+    | awk '{if(NR > 1) {printf("%%s\\t%%s\\t%%s\\t%%s\\n", $2, $3, $3+1, $1)}}'
     | gzip > %(outfile)s
     '''
 
@@ -457,6 +464,44 @@ def goShifter(infiles, outfile):
 
     P.run()
 
+
+@follows(goShifter)
+@transform(goShifter,
+           regex("goshifter.dir/(.+).goshift"),
+           r"goshifter.dir/\1.pval ")
+def extractPvalueGoshifter(infile, outfile):
+    '''
+    Extract the GoShifter enrichment p-value from
+    the log output.
+    '''
+
+    job_memory = "1G"
+
+    statement = '''
+    tail -n 10 %(infile)s | grep "p-value" |
+    cut -f 2 -d "=" | sed 's/ //g' > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(extractPvalueGoshifter)
+@transform(goShifter,
+           regex("goshifter.dir/(.+).goshift"),
+           r"goshifter.dir/\1.boundary")
+def extractAnnotationBoundaryGoshifter(infile, outfile):
+    '''
+    Extract the extension size of the LD boundary
+    '''
+
+    job_memory = "1G"
+
+    statement = '''
+    tail -n 10 %(infile)s | grep "extended by" |
+    cut -f 8 -d " " > %(outfile)s
+    '''
+
+    P.run()
 
 @follows(goShifter)
 @collate(goShifter,
