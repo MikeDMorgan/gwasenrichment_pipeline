@@ -333,28 +333,32 @@ def mergeHaplotypeBeds(infiles, outfile):
 
 @follows(mergeHaplotypeBeds,
          mkdir("snpsets.dir"))
-@transform("%s/*.tsv" % PARAMS['snpset_dir'],
-           regex("(.+)/(.+).tsv"),
+@transform(convertSnpsetToBed,
+           regex("(.+)/(.+).snpset.bed.gz"),
            add_inputs(mergeHaplotypeBeds),
            r"snpsets.dir/\2.haplotype.bed.gz")
 def convertSet2Block(infiles, outfile):
     '''
-    Convert list of SNP IDs into
+    Convert list of SNP BED file into
     interval haplotype or linkage blocks
+
+    Use bedtools intersect, left outer join.
+
+    Requires bedtools is in your $PATH variable
     '''
 
     snp_file = infiles[0]
-    bed_file = infiles[1]
+    haplotype_file = infiles[1]
 
     job_memory = "1G"
 
     statement = '''
-    python /ifs/devel/projects/proj045/enrichment_pipeline/snps2bed.py
-    --ld-source=plink
-    --ld-blocks=%(bed_file)s
-    --log=%(outfile)s.log
-    %(snp_file)s
-    | gzip > %(outfile)s
+    bedtools
+    intersect -a %(snp_file)s  -b %(haplotype_file)s  -wb -loj |
+    awk '{if($6 == -1) {print($1, $2, $3, $4)}
+    else{printf("%%s\\t%%s\\t%%s\\t%%s\\n", $5, $6, $7, $4)}}'
+    | sed 's/ /\\t/g' |
+    gzip > %(outfile)s
     '''
 
     P.run()
@@ -430,6 +434,13 @@ def mergeGatResults(infiles, outfile):
 
     P.run()
 
+
+# need to intersect enriched annotations with SNPs of interest
+
+
+# -------------------------------------------------------- #
+# GoShifter SNP-annotation enrichment
+# -------------------------------------------------------- #
 
 @follows(convertSNPstoSNPset,
          mkdir("goshifter.dir"))

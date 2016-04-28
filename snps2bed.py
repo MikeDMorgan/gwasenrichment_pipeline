@@ -11,7 +11,9 @@ Purpose
 -------
 
 .. To merge SNP sets and select representative linkage blocks as
- intervals
+ intervals.
+
+It's basically just a wrapper for bedtools
 
 Usage
 -----
@@ -94,6 +96,9 @@ def main(argv=None):
                       help="prorgam used to generate linkage/"
                       "haplotype blocks")
 
+    parser.add_option("--snp-positions", dest="snp_pos", type="string",
+                      help="file containing SNP genome positions")
+
     # add common options (-h/--help, ...) and parse command line
     (options, args) = E.Start(parser, argv=argv)
 
@@ -104,8 +109,12 @@ def main(argv=None):
     elif options.ld == "plink":
         ld_intervals = parsePlinkLDBlocks(options.ld_blocks)
 
+    # use a set, set operations are fast and well optimized
     with IOTools.openFile(infile, "r") as snpfile:
         snpset = set([sx.rstrip("\n") for sx in snpfile.readlines()])
+
+    # parse the bim file, pull out the relevant SNP positions
+    snp_dict = {}
 
     snp_intervals = {}
     # intersect with intervals
@@ -115,8 +124,13 @@ def main(argv=None):
             ld_block = ld_intervals[key]
             snp_intervals[ld_block] = intersect
         else:
+            # allow SNPs not in haplotypes to be single
+            # position intervals
             pass
 
+    
+    # add a check that SNPs not in haplotype blocks
+    # are still included
     for block in snp_intervals.keys():
         contig = block.split(":")[0]
         start = block.split(":")[-1].split("-")[0]
@@ -125,7 +139,7 @@ def main(argv=None):
         options.stdout.write("%s\t%s\t%s\t%s\n" % (contig,
                                                    start,
                                                    end,
-                                                   name))
+    #                                                name))
 
     # write footer and output benchmark information.
     E.Stop()
