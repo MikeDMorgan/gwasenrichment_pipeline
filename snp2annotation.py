@@ -112,14 +112,12 @@ Requirements:
 '''
 
 # TODO:
-# * documentation
 # * cleaner output
 # * split by SNP?
 # * allow depletion of enrichment, and both when selecting statistically sig enrichments
 # * summarise over annotations for each SNP
 # * include enrichment statistics?
 # * output/allow for SNPs that don't intersect any features
-# * add logging output/information
 
 
 import sys
@@ -221,6 +219,10 @@ def findSigResults(input_file, qval_thresh=0.01,
     for cell in cells:
         cell_df = merge_sig[merge_sig["cell_type"] == cell]
         enriched_annots[cell] = cell_df["annot"].values
+        E.info("{} annotations with signficant enrichment "
+               "in {} cells".format(enriched_annots[cell].shape[0],
+                                    cell))
+
         
 
     return enriched_annots
@@ -259,12 +261,13 @@ def parseBedtools(bedout):
                 "annot_name": []}
 
     rows = bedout.split("\n")
+    no_intersect = set()
     for row in rows:
         if len(row):
             components = row.split("\t")
             snp_chr, snp_str, snp_end, snp_id = components[:4]
             annot_chr, annot_str, annot_end, annot_name = components[4:]
-
+        
             snp_dict["snp"].append(snp_id)
             snp_dict["chr"].append(snp_chr)
             snp_dict["start"].append(snp_str)
@@ -274,6 +277,9 @@ def parseBedtools(bedout):
             snp_dict["annot_end"].append(annot_end)
             snp_dict["annot_name"].append(annot_name)
 
+    E.info("{} SNPs overlapping enriched annotations".format(
+        len(snp_dict["snp"])))
+           
     return snp_dict
 
 
@@ -303,8 +309,11 @@ def intersectSnpWithAnnotation(snp_bed, annotation_bed,
       that SNP
     '''
 
+    # to get SNPs that don't intersect any annotations
+    # use left outer join
     command = "bedtools intersect -a {} -b {} -wb "
-    
+
+    E.info("Intersecting SNP positions with annotations")
     process = subprocess.Popen(command.format(snp_bed,
                                               annotation_bed),
                                shell=True, executable="/bin/bash",
@@ -374,9 +383,23 @@ def main(argv=None):
 
     abs_path = os.path.abspath(options.annot_dir)
 
+    # get a list of all SNPs from input bed file
+    # use this to find SNPs that don't intersect
+    # any annotations
+
+    test_snps = set()
+    with IOTools.openFile(options.snp_bed, "rb") as sfile:
+        for line in sfile.readlines():
+            snp = line.split("\t")[3]
+            test_snps.add(snp)
+
+    E.info("{} SNPs found to test for overlap".format(len(test_snps)))    
+
     snp_dict = {}
     counter = 0
     for cell in annots.keys():
+        E.info("Intersecting SNPs with enriched annotations "
+               "in {}".format(cell))
         cell_re = re.compile(r"^{}.bed".format(cell))
         cell_files = [cx for cx in dirlist if re.match(cell_re, cx)]
 

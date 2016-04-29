@@ -372,8 +372,7 @@ def convertSet2Block(infiles, outfile):
 @follows(convertSet2Block,
          mergeBedAnnotations,
          mkdir("gat.dir"))
-@product([convertSet2Block,
-          convertSnpsetToBed],
+@product(convertSet2Block,
          formatter("(.bed.gz)$"),
          mergeBedAnnotations,
          formatter("(.bed.gz$)"),
