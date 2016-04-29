@@ -1,5 +1,5 @@
 '''
-snps2annotation.py - assign SNPs to overlapping enriched annotations
+snp2annotation.py - assign SNPs to overlapping enriched annotations
 ===================================================================================
 
 :Author: Mike Morgan
@@ -11,50 +11,116 @@ Purpose
 -------
 
 .. Uses the output from GAT to assign SNPs to overlapping
-annotations using bedtools
+annotations using bedtools for statistically and biologically
+enriched annotations.
 
 Input
 -----
 
-SNP file: BED4 format, 4th column is the SNP ID
+SNP file: BED format, 4th column is the SNP ID
 
-GAT results: table containing merged results from GAT.  This should contain column headers::
+GAT results: table containing merged results from GAT.  This should contain
+column headers::
+
   <celltype_<statistic>
+
   Row names are the annotations tested
 
-Annotation directory: location of BED files containing the features tested by GAT
-
+Annotation directory: location of BED files containing the features tested by
+GAT.
 
 Usage
 -----
 
-.. Example use case
+Assume GAT has been run across different annotations and cell types, and the
+tables merged, retaining the test statistics and effect estimates.  The input
+table is has column headers with format: <celltype_<statistic>.  Annotations
+not measured in a given cell type will contain "na" values.
+
+e.g.
+head -n 5 merged-gat.tsv | cut -f1,5::
+
+  annotation  Astro_fold  Astro_l2fold  Astro_pvalue  Astro_qvalue
+  H3K27me3    0.22        -2.1626       8.5340e-02    1.7068e-01
+  H3K9me3     0.9892      -0.0157       5.7189e-01    5.7189e-01
+  H3K4me1     1.2147      0.2806        2.8717e-01    3.1328e-01
+  H3K79me2    1.3394      0.4216        2.7999e-01    3.1328e-01
+
+head snpset.bed::
+
+  chr2    65595586     65595587     rs934734
+  chr2    100806940    100806941    rs11676922
+  chr6    167534290    167534291    rs3093023
+  chr9    123651301    123651302    rs2072438
+  chr2    162851147    162851148    rs12617656
+  chr6    167533062    167533063    rs1854853
+
+ls annotation.dir/ | head ::
+
+Astrocytes.bed.gz
+CNCC.bed.gz
+Dermal_fibroblast.bed.gz
+Dnd41.bed.gz@
+Fibroblast.bed.gz@
+
+We'll declare statistically significant enrichments as q-value <= 0.01 and
+biologically significant if log2 fold enrichment >= 2.0.  We will only
+consider enriched, rather than both enriched and depleted annotations.
 
 Example::
 
-   python snps2anotation.py
+   python snp2anotation.py  --snp-bed=snpset.bed
+                            --annotation.dir=annotation.dir
+                            --q-value-threshold=0.01
+                            --l2fold-threshold=2.0
+                            --l2fold-direction=up
+                            --log=enrichment.log
+                            merged-gat.tsv
+                            > enriched-annotations.tsv
 
 Type::
 
-   python snps2annotation.py --help
+   python snp2annotation.py --help
 
 for command line help.
 
 Command line options
 --------------------
 
+`--snp-bed` - BED file containing SNP genome positions.  Required fields are
+              chromosome, start, end and name (SNP ID).  Any other columns are
+              optional.
+
+`--annotation-dir` - Directory containing annotation BED files per cell type.
+                     Required fields are chromosome, start, end, name.
+                     Additional fields are optional.
+
+`--q-value-threshold` - q-vaue threshold below which to declare statistically
+                        significant enrichment of annotations.
+
+`--l2fold-thresold` - Log2 fold enrichment threhold beyond which to declare
+                      biologically significant enrichment.
+
+`--l2fold-direction` - Direction of log2 fold enrichment for declaring
+                       enrichment. Can be up, down or both.  The later
+                       takes the inverse of values < 1 when selecting
+                       enriched annotations.
+
 Requirements:
 * bedtools >= 2.2
 
-TODO:
-* documentation
-* cleaner output
-* split by SNP?
-* summarise over annotations for each SNP
-* include enrichment statistics?
-* output/allow for SNPs that don't intersect any features
-
 '''
+
+# TODO:
+# * documentation
+# * cleaner output
+# * split by SNP?
+# * allow depletion of enrichment, and both when selecting statistically sig enrichments
+# * summarise over annotations for each SNP
+# * include enrichment statistics?
+# * output/allow for SNPs that don't intersect any features
+# * add logging output/information
+
 
 import sys
 import CGAT.Experiment as E
@@ -268,9 +334,6 @@ def main(argv=None):
     # setup command line parser
     parser = E.OptionParser(version="%prog version: $Id$",
                             usage=globals()["__doc__"])
-
-    parser.add_option("-t", "--test", dest="test", type="string",
-                      help="supply help")
 
     parser.add_option("--snp-bed", dest="snp_bed", type="string",
                       help="path to file containing SNP BED file")
