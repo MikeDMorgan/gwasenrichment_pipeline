@@ -57,11 +57,11 @@ head snpset.bed::
 
 ls annotation.dir/ | head ::
 
-Astrocytes.bed.gz
-CNCC.bed.gz
-Dermal_fibroblast.bed.gz
-Dnd41.bed.gz@
-Fibroblast.bed.gz@
+  Astrocytes.bed.gz
+  CNCC.bed.gz
+  Dermal_fibroblast.bed.gz
+  Dnd41.bed.gz
+  Fibroblast.bed.gz
 
 We'll declare statistically significant enrichments as q-value <= 0.01 and
 biologically significant if log2 fold enrichment >= 2.0.  We will only
@@ -98,7 +98,7 @@ Command line options
 `--q-value-threshold` - q-vaue threshold below which to declare statistically
                         significant enrichment of annotations.
 
-`--l2fold-thresold` - Log2 fold enrichment threhold beyond which to declare
+`--l2fold-threshold` - Log2 fold enrichment threhold beyond which to declare
                       biologically significant enrichment.
 
 `--l2fold-direction` - Direction of log2 fold enrichment for declaring
@@ -375,7 +375,15 @@ def main(argv=None):
     # infile is the merged GAT results
     infile = argv[-1]
 
+    # need to exit if there are no significant results
     annots = findSigResults(infile)
+
+    if len(annots):
+        pass
+    else:
+        E.warn("There are no significantly enriched "
+               "annotations.  Exiting")
+        return 0
 
     # also contains log files
     # make sure these are excluded

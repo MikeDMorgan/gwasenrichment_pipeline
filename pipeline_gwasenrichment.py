@@ -435,6 +435,36 @@ def mergeGatResults(infiles, outfile):
 
 
 # need to intersect enriched annotations with SNPs of interest
+@follows(mergeGatResults,
+         mkdir("overlaps.dir"))
+@transform(mergeGatResults,
+           regex("gat.dir/(.+)-(.+).gat"),
+           add_inputs(r"snpsets.dir/\1.snpset.bed.gz"),
+           r"overlaps.dir/\1-SNP_overlap.bed.gz")
+def overlapSnpsWithAnnotations(infiles, outfile):
+    '''
+    Get SNPs that overlap enriched annotations
+    across all cell types
+    '''
+
+    annotation_dir = "bed.dir"
+    gat_results = infiles[0]
+    snp_bed = infiles[1]
+
+    job_memory = "1G"
+
+    statement = '''
+    python /ifs/devel/projects/proj045/enrichment_pipeline/snp2annotation.py
+    --log=%(outfile)s.log
+    --annotation-dir=%(annotation_dir)s
+    --q-value-threshold=0.01
+    --l2fold-threshold=2.0
+    --snp-bed=%(snp_bed)s
+    %(gat_results)s
+    | gzip > %(outfile)s
+    '''
+
+    P.run()
 
 
 # -------------------------------------------------------- #
@@ -478,7 +508,7 @@ def goShifter(infiles, outfile):
 @follows(goShifter)
 @transform(goShifter,
            regex("goshifter.dir/(.+).goshift"),
-           r"goshifter.dir/\1.pval ")
+           r"goshifter.dir/\1.pval")
 def extractPvalueGoshifter(infile, outfile):
     '''
     Extract the GoShifter enrichment p-value from
@@ -513,31 +543,111 @@ def extractAnnotationBoundaryGoshifter(infile, outfile):
 
     P.run()
 
-@follows(goShifter)
-@collate(goShifter,
-         regex("goshifter.dir/(.+).snpset_vs_(.+).bed.goshift"),
-         r"goshifter.dir/\1.goshift")
-def mergeGoshifterResults(infiles, outfile):
+
+@follows(extractAnnotationBoundaryGoshifter,
+         goShifter)
+@transform("goshifter.dir/*.enrich",
+           regex("goshifter.dir/(.+).goshift.(.+).enrich"),
+           r"goshifter.dir/\1.summary")
+def extractEnrichmentSummary(infile, outfile):
     '''
-    Merge output from Goshifter into a single table
+    Calculate the median enrichment score across SNPs
+    for each annotation tested
     '''
 
     job_memory = "1G"
 
-    infiles = " ".join(infiles)
+    statement = '''
+    python /ifs/devel/projects/proj045/enrichment_pipeline/enrich2stats.py
+    --statistic=summary
+    --data-column=3
+    --log=%(outfile)s.log
+    %(infile)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(goShifter)
+@collate([extractPvalueGoshifter,
+          extractAnnotationBoundaryGoshifter,
+          extractEnrichmentSummary],
+         regex("goshifter.dir/(.+).bed.(.+)"),
+         r"goshifter.dir/\1.results")
+def mergeGoshifterResults(infiles, outfile):
+    '''
+    Merge output from Goshifter into a single table
+    for each tested annotation
+    '''
+
+    job_memory = "1G"
+
+    infiles = ",".join(infiles)
 
     statement = '''
-    python %(scriptsdir)s/combine_tables.py
-    --columns=2
-    --take=8,9,10,11
-    --add-file-prefix
-    --regex-filename="_vs_(.+).bed.gat"
+    python /ifs/devel/projects/proj045/enrichment_pipeline/enrich2stats.py
+    --method=merge
     --log=%(outfile)s.log
     %(infiles)s
     > %(outfile)s
     '''
 
     P.run()
+
+
+@follows(mergeGoshifterResults)
+@collate(mergeGoshifterResults,
+         regex("goshifter.dir/(.+)_vs_(.+)-(.+).results"),
+         r"goshifter.dir/\1.goshifter")
+def mergeAllGoshifterResults(infiles, outfile):
+    '''
+    Merge together all of the GoShifter summary
+    results over all tested annotations and cell types
+    '''
+
+    job_memory = "4G"
+
+    infiles = ",".join(infiles)
+
+    statement = '''
+    python /ifs/devel/projects/proj045/enrichment_pipeline/enrich2stats.py
+    --method=append
+    --log=%(outfile)s.log   
+    %(infiles)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(mergeAllGoshifterResults)
+@collate("goshifter.dir/*.locusscore",
+         regex("goshifter.dir/(.+)_vs_(.+).bed.(.+).locusscore"),
+         r"goshifter.dir/\1.snpscores")
+def mergeSnpScores(infiles, outfile):
+    '''
+    Merge together SNP scores for each
+    cell type - annotation combination
+    '''
+
+    job_memory = "6G"
+
+    infiles = " ".join(infiles)
+
+    statement = '''
+    python %(scriptsdir)s/combine_tables.py
+    --columns=1
+    --take=3
+    --add-file-prefix
+    --regex-filename="_vs_(.+).bed.goshift.nperm(\d+).locusscore"
+    --log=%(outfile)s.log
+    %(infiles)s
+    > %(outfile)s
+    '''
+
+    P.run()
+
 
 # ---------------------------------------------------
 # Generic pipeline tasks
