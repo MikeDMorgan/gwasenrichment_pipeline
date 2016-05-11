@@ -24,6 +24,7 @@ SnpOnMotif <- function(snp_ids, r_scripts, output_dir, motif_dbname="JASPAR",
   # remove non-rsID SNPS
   message("Selecting SNPs with valid rsIDs")
   snp.ids  <- unique(snp_ids[grepl(snp_ids, pattern="rs")])
+  message(paste0("Found ", length(snp.ids), " SNPs"))
   
   message("Accessing dbSNP v144 SNPs and positions in Hg19")
   all_snps <- SNPlocs.Hsapiens.dbSNP144.GRCh37
