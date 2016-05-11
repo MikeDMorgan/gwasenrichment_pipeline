@@ -29,14 +29,15 @@ Pipeline template
 :Date: |today|
 :Tags: Python
 
-.. Replace the documentation below with your own description of the
-   pipeline's purpose
-
 Overview
 ========
 
-This pipeline computes the word frequencies in the configuration
-files :file:``pipeline.ini` and :file:`conf.py`.
+This pipeline pulls together different genomic annotations, provided by
+the user, over different cell types, and test for enrichment of overlap
+for input SNP set(s).  It then finds the SNPs overlapping the enriched
+annotations and looks for both enriched motifs in those intervals,
+and finds SNPs overlapping the motifs.  These are tested for their
+disruptive ability using motifbreakR.
 
 Usage
 =====
@@ -649,6 +650,155 @@ def mergeSnpScores(infiles, outfile):
     P.run()
 
 
+# --------------------------------------------------- #
+# Test enriched annotation intervals for motif enrichment
+# using MEME-suite tools (Centrimo)
+
+# need the user to define which cell type(s) and
+# annotation are of interest
+@follows(overlapSnpsWithAnnotations,
+         mkdir("fasta.dir"))
+@transform(overlapSnpsWithAnnotations,
+           regex("overlaps.dir/(.+)-SNP_overlap.bed.gz"),
+           r"overlaps.dir/\1-intervals.bed.gz")
+def getAnnotationsOverlapWithSnps(infile, outfile):
+    '''
+    Get the enriched annotation intervals that overlap
+    SNPs.
+    '''
+
+    job_memory = "1G"
+
+    statement = '''
+    zcat %(infile)s | grep -P %(annotations_regex)s
+    | grep -P %(annotations_cell_regex)s
+    | cut -f 5-9
+    | awk '{printf("%%s\\t%%s\\t%%s\\t%%s_%%s\\n", $1,$2,$3,$5,$4)}'
+    | gzip > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(getAnnotationsOverlapWithSnps,
+         mkdir("enriched_annotation.dir"))
+@subdivide(getAnnotationsOverlapWithSnps,
+           regex("overlaps.dir/(.+)-intervals.bed.gz"),
+           r"enriched_annotation.dir/split-enriched.txt")
+def splitEnrichedAnnotations(infile, outfile):
+    '''
+    Split enriched annotations overlapping SNPs
+    into separate BED files
+    '''
+
+    job_memory = "1G"
+
+    # what an awk statement!
+    # it redirects each line to a file that matches
+    # the cell type_annotation field in column 4
+    
+
+    statement = '''
+    zcat %(infile)s |
+    awk '{if(NR == 1) {s = $4; print $0 > "enriched_annotation.dir/"s".bed";} 
+    else {s_1 = $4;} {if(s == s_1) {print $0 > "enriched_annotation.dir/"s".bed";} 
+    else {s = s_1; print $0 > "enriched_annotation.dir/"s_1".bed"}}}'
+    '''
+
+    P.run()
+    P.touch(outfile)
+
+
+@follows(splitEnrichedAnnotations)
+@transform("enriched_annotation.dir/*.bed",
+           regex("enriched_annotation.dir/(.+).bed"),
+           r"enriched_annotation.dir/\1-slop.bed.gz")
+def slopIntervals(infile, outfile):
+    '''
+    Set all annotation intervals to a specific size
+    for MEME suite tools <- use bedtools slop
+    '''
+
+    job_memory = "2G"
+
+    interval = PARAMS['bed_interval']/2.0
+
+    genome_contigs = "/".join([PARAMS['annotations_dir'],
+                               PARAMS['annotations_contigs']])
+
+    # need to set the interval to the midpoint of the input interval
+    # before slopping with bedtools
+    # add a numeric id to interval name
+    statement = '''
+    cat %(infile)s |
+    awk '{printf("%%s\\t%%i\\t%%i\\t%%s_%%i\\n", $1, ($2 + ($3 - $2)/2),
+    ($2 + ($3 - $2)/2), $4, NR)}'
+    | bedtools slop -l %(interval)s  -r %(interval)s -i -
+    -g %(genome_contigs)s
+    | gzip > %(outfile)s
+    '''
+    
+    P.run()
+
+
+@follows(splitEnrichedAnnotations,
+         slopIntervals,
+         mkdir("fasta.dir"))
+@transform("enriched_annotation.dir/*.bed.gz",
+           regex("enriched_annotation.dir/(.+)-slop.bed.gz"),
+           r"fasta.dir/\1.fa")
+def getIntervalFasta(infile, outfile):
+    '''
+    Retrieve the genome sequence as FASTA
+    for slopped intervals <- required
+    input for MEME-chip
+    '''
+
+    job_memory = "4G"
+
+    statement = '''
+    zcat %(infile)s |
+    python %(scriptsdir)s/bed2fasta.py
+    --genome=%(genome_fasta)s
+    --log=%(outfile)s.log
+    > %(outfile)s
+    '''
+
+    P.run()
+
+
+@follows(getIntervalFasta,
+         mkdir("meme.dir"))
+@transform(getIntervalFasta,
+           regex("fasta.dir/(.+).fa"),
+           r"meme.dir/\1.dir/motif_alignment.txt")
+def runMemeChip(infile, outfile):
+    '''
+    Run the MEME-suite tools on the
+    input interval sequences to test for
+    enriched motifs.  If there are very
+    few intervals there is unlikely to be much
+    power to detect enrichments
+    '''
+
+    job_memory = "4G"
+
+    out_dir = "/".join(outfile.split("/")[:-1])
+    # meme-chip needs to be in the $PATH
+    # variable
+    statement = '''
+    meme-chip %(infile)s
+    -oc %(out_dir)s
+    -db %(meme_db)s
+    '''
+
+    P.run()
+
+
+# find SNPs overlapping enriched annotations
+# at test for motif disruption
+
+
 # ---------------------------------------------------
 # Generic pipeline tasks
 @follows(convertSet2Block,
@@ -656,13 +806,18 @@ def mergeSnpScores(infiles, outfile):
 def process_samples():
     pass
 
-@follows(genomicAsssociationTest,
-         goShifter)
+@follows(overlapSnpsWithAnnotations,
+         mergeSnpScores)
 def test_enrichment():
     pass
 
+@follows(runMemeChip)
+def find_motifs():
+    pass
+
 @follows(process_samples,
-         test_enrichment)
+         test_enrichment,
+         find_motifs)
 def full():
     pass
 
