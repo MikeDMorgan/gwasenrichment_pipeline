@@ -34,6 +34,13 @@ SnpOnMotif <- function(snp_ids, r_scripts, output_dir, motif_dbname="JASPAR",
                          BPPARAM = BiocParallel::bpparam())
   
   # harangue results GRangess into a dataframe to write out
-  res.df <- mcols(results)
-  return(res.df)
+  res.df <- data.frame(seqnames=seqnames(results),
+                       starts=start(results),
+                       ends=end(results),
+                       names=names(results),
+                       scores=rep(("."), length(results)),
+                       strand=strand(results))
+  meta.df <- mcols(results)
+  
+  return(cbind(res.df, meta.df))
 }
