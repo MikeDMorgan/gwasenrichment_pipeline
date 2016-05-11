@@ -22,25 +22,25 @@ SnpOnMotif <- function(snp_ids, r_scripts, output_dir, motif_dbname="JASPAR",
                        species="Hsapiens", filter_threshold=1e-3,
                        add_motif=F, motif_pwm=""){
   # remove non-rsID SNPS
-  print("Selecting SNPs with valid rsIDs")
+  message("Selecting SNPs with valid rsIDs")
   snp.ids  <- unique(snp_ids[grepl(snp_ids, pattern="rs")])
   
-  print("Accessing dbSNP v144 SNPs and positions in Hg19")
+  message("Accessing dbSNP v144 SNPs and positions in Hg19")
   all_snps <- SNPlocs.Hsapiens.dbSNP144.GRCh37
   snps.mb <- snps.from.rsid(rsid=snp.ids, dbSNP=SNPlocs.Hsapiens.dbSNP144.GRCh37,
                             search.genome=BSgenome.Hsapiens.UCSC.hg19)
   data(motifbreakR_motif)
   
-  print(paste("Adding additional motif", motif_pwm))
+  message(paste("Adding additional motif", motif_pwm))
   source(paste0(r_scripts, "/", "mitf_motif_break.R"))
   # add extra motifs
   if(add_motif == T) addMitfMotif(motifbreakR_motif, motif_pwm)
   
-  print(paste0("Searching motifs for ", species, " motifs only"))
+  message(paste0("Searching motifs for ", species, " motifs only"))
   motifs <- query(motifbreakR_motif, queryString=motif_dbname, ignore.case=T)
   hsapiens_mitf <- query(motifs, queryString=species)
   
-  print("Testing motif disrupting SNPs")  
+  message("Testing motif disrupting SNPs")  
   results <- motifbreakR(snpList=snps.mb,
                          pwmList=hsapiens_mitf,
                          filterp=TRUE,
@@ -49,8 +49,8 @@ SnpOnMotif <- function(snp_ids, r_scripts, output_dir, motif_dbname="JASPAR",
                          bkg=c(A=0.25, C=0.25, G=0.25, T=0.25),
                          BPPARAM = BiocParallel::bpparam())
   
-  print(paste0("Found ", length(unique(names(results))), 
-               " motif disrupting SNPs"))
+  message(paste0("Found ", length(unique(names(results))), 
+                 " motif disrupting SNPs"))
   
   # plot some motif disrupting SNPs
   if(length(names(results)) > 0){
