@@ -114,12 +114,12 @@ def testMotifsDisruption(snp_list, save_path, scripts_dir,
     R.assign("add.motif", add_motif)
 
     E.info("Executing motifbreakR R script: {}".format(r_script))
-    R('''res.df <- SnpOnMotif(snp_ids=snp.ids, r_scripts="%(scripts_dir)s",'''
+    R('''resdf <- SnpOnMotif(snp_ids=snp.ids, r_scripts="%(scripts_dir)s",'''
       '''output_dir="%(save_path)s",'''
       '''add_motif=add.motif, '''
       '''motif_pwm="%(motif_pwm)s")''' % locals())
     R('''sink(file=NULL)''')
-    res_df = py2ri.ri2py(R["res.df"])
+    res_df = py2ri.ri2py(R["resdf"])
 
     return res_df
 
@@ -177,14 +177,21 @@ def main(argv=None):
     else:
         indf = pd.read_table(infile, sep="\t", index_col=None,
                              header=None)
-        
-    snp_ids = indf.iloc[:, options.snp_col].values
+
+    if type(indf) == pd.core.series:
+        snp_ids = indf.values
+    else:
+        snp_ids = indf.iloc[:, options.snp_col].values
 
     out_df = testMotifsDisruption(snp_list=snp_ids,
                                   save_path=options.image_dir,
                                   scripts_dir=options.scripts_dir,
                                   r_script=options.r_script,
                                   motif_pwm=options.add_motif)
+
+
+    out_df.to_csv(options.stdout, sep="\t",
+                  index=None)
 
     # write footer and output benchmark information.
     E.Stop()

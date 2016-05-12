@@ -789,7 +789,7 @@ def runMemeChip(infile, outfile):
     statement = '''
     meme-chip %(infile)s
     -oc %(out_dir)s
-    -db %(meme_db)s
+    -db %(motifs_db)s
     '''
 
     P.run()
@@ -797,6 +797,40 @@ def runMemeChip(infile, outfile):
 
 # find SNPs overlapping enriched annotations
 # at test for motif disruption
+
+@follows(runMemeChip,
+         overlapSnpsWithAnnotations,
+         mkdir("plots.dir", "motifs.dir"))
+@transform(overlapSnpsWithAnnotations,
+           regex("overlaps.dir/(.+)-SNP_overlap.bed.gz"),
+           r"motifs.dir/\1-disrupted.tsv")
+def testMotifDisruptingSnps(infile, outfile):
+    '''
+    test SNPs for motif disrupting effects using
+    motifbreakR
+    '''
+
+    job_memory = "6G"
+
+    tmp = P.getTempFilename(shared=True)
+
+    statement = '''
+    zcat %(infile)s
+    | grep -P %(annotations_regex)s
+    | grep -P %(annotations_cell_regex)s
+    > %(tmp)s; checkpoint;
+    python /ifs/devel/projects/proj045/enrichment_pipeline/snps2motif.py
+    --log=%(outfile)s.log
+    --snp-column=3
+    --R-scripts-directory=%(r_scripts)s
+    --R-script=%(motifs_script)s
+    --additional-motif=%(motifs_pwms)s
+    --image-directory=plots.dir
+    %(tmp)s
+    > %(outfile)s; checkpoint;
+    rm -f %(tmp)s'''
+
+    P.run()
 
 
 # ---------------------------------------------------
@@ -811,7 +845,8 @@ def process_samples():
 def test_enrichment():
     pass
 
-@follows(runMemeChip)
+@follows(runMemeChip,
+         testMotifDisruptingSnps)
 def find_motifs():
     pass
 

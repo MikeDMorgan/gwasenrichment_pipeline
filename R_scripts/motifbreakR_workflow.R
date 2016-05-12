@@ -11,6 +11,7 @@ library(rtracklayer)
 generateMotifImage <- function(ranges, snp_id, effect, 
                                save_dir){
   # the file name is just the SNP ID.png
+  message(paste0("Generating plot for ", snp_id))
   filename = paste0(save_dir, "/", snp_id, "-motifbreakR.png")
   png(filename, height=10.8, width=9, res=90, units="in")
   plotMB(ranges, rsid=snp_id, effect=effect)
@@ -73,5 +74,5 @@ SnpOnMotif <- function(snp_ids, r_scripts, output_dir, motif_dbname="JASPAR",
                        strand=strand(results))
   meta.df <- mcols(results)
   
-  return(cbind(res.df, meta.df))
+  return(data.frame(cbind(res.df, meta.df)))
 }
