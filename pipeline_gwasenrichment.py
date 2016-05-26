@@ -454,12 +454,13 @@ def overlapSnpsWithAnnotations(infiles, outfile):
 
     job_memory = "1G"
 
+    # set q-value and log2 fold enrichment in the config
     statement = '''
     python /ifs/devel/projects/proj045/enrichment_pipeline/snp2annotation.py
     --log=%(outfile)s.log
     --annotation-dir=%(annotation_dir)s
-    --q-value-threshold=0.01
-    --l2fold-threshold=2.0
+    --q-value-threshold=%(gat_qval_thresh)f
+    --l2fold-threshold=%(gat_l2fold_thresh)f
     --snp-bed=%(snp_bed)s
     %(gat_results)s
     | gzip > %(outfile)s
@@ -560,6 +561,7 @@ def extractEnrichmentSummary(infile, outfile):
 
     statement = '''
     python /ifs/devel/projects/proj045/enrichment_pipeline/enrich2stats.py
+    --method=stat
     --statistic=summary
     --data-column=3
     --log=%(outfile)s.log
@@ -570,10 +572,13 @@ def extractEnrichmentSummary(infile, outfile):
     P.run()
 
 
-@follows(goShifter)
+@follows(goShifter,
+         extractPvalueGoshifter,
+         extractAnnotationBoundaryGoshifter,
+         extractEnrichmentSummary)
 @collate([extractPvalueGoshifter,
-          extractAnnotationBoundaryGoshifter,
-          extractEnrichmentSummary],
+          extractEnrichmentSummary,
+          extractAnnotationBoundaryGoshifter],
          regex("goshifter.dir/(.+).bed.(.+)"),
          r"goshifter.dir/\1.results")
 def mergeGoshifterResults(infiles, outfile):
@@ -803,8 +808,8 @@ def runMemeChip(infile, outfile):
          mkdir("plots.dir", "motifs.dir"))
 @transform(overlapSnpsWithAnnotations,
            regex("overlaps.dir/(.+)-SNP_overlap.bed.gz"),
-           r"motifs.dir/\1-disrupted.tsv")
-def testMotifDisruptingSnps(infile, outfile):
+           r"motifs.dir/\1-enriched-disrupted.tsv")
+def testMotifDisruptingSnpsEnrichedAnnotations(infile, outfile):
     '''
     test SNPs for motif disrupting effects using
     motifbreakR
@@ -833,6 +838,43 @@ def testMotifDisruptingSnps(infile, outfile):
     P.run()
 
 
+@follows(runMemeChip,
+         overlapSnpsWithAnnotations,
+         testMotifDisruptingSnpsEnrichedAnnotations,
+         mkdir("plots.dir", "motifs.dir"))
+@transform("snpsets.dir/*-gat.tsv",
+           regex("snpsets.dir/(.+)-gat.tsv"),
+           add_inputs(overlapSnpsWithAnnotations),
+           r"motifs.dir/\1-notenriched-disrupted.tsv")
+def testMotifDisruptingSnpsNotEnriched(infiles, outfile):
+    '''
+    test SNPs for motif disrupting effects using
+    motifbreakR
+    '''
+
+    infile = infiles[0]
+    annot_file = infiles[1]
+    job_memory = "6G"
+
+    tmp = P.getTempFilename(shared=True)
+
+    statement = '''
+    comm -23 %(infile)s <(zcat %(annot_file)s | cut -f 4 | sort)
+    > %(tmp)s; checkpoint;
+    python /ifs/devel/projects/proj045/enrichment_pipeline/snps2motif.py
+    --log=%(outfile)s.log
+    --snp-column=0
+    --R-scripts-directory=%(r_scripts)s
+    --R-script=%(motifs_script)s
+    --additional-motif=%(motifs_pwms)s
+    --image-directory=plots.dir
+    %(tmp)s
+    > %(outfile)s; checkpoint;
+    rm -f %(tmp)s'''
+
+    P.run()
+
+
 # ---------------------------------------------------
 # Generic pipeline tasks
 @follows(convertSet2Block,
@@ -846,7 +888,8 @@ def test_enrichment():
     pass
 
 @follows(runMemeChip,
-         testMotifDisruptingSnps)
+         testMotifDisruptingSnpsEnrichedAnnotations,
+         testMotifDisruptingSnpsNotEnriched)
 def find_motifs():
     pass
 

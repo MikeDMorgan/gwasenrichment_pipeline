@@ -129,6 +129,7 @@ def main(argv=None):
             stat_df = pd.read_table(summary_file, sep="\t", header=None,
                                     index_col=0).T
         except ValueError:
+            # need to convert to a dataframe for output to stdout
             stat_df = pd.Series({"Median": 0,
                                  "Mean": 0,
                                  "Min": 0,

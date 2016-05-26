@@ -180,7 +180,6 @@ def findSigResults(input_file, qval_thresh=0.01,
                                                     errors='coerce'))
     l2_df = l2_df.apply(lambda x: pd.to_numeric(x,
                                                 errors='coerce'))
-
     # selct annotations breaching thresholds
     # separately, then merge them - makes it easier
     # to read rather than chaining operations
@@ -222,8 +221,6 @@ def findSigResults(input_file, qval_thresh=0.01,
         E.info("{} annotations with signficant enrichment "
                "in {} cells".format(enriched_annots[cell].shape[0],
                                     cell))
-
-        
 
     return enriched_annots
 
@@ -376,7 +373,9 @@ def main(argv=None):
     infile = argv[-1]
 
     # need to exit if there are no significant results
-    annots = findSigResults(infile)
+    annots = findSigResults(infile,
+                            qval_thresh=options.q_thresh,
+                            l2fold_thresh=options.l2_thresh)
 
     if len(annots):
         pass
@@ -414,18 +413,22 @@ def main(argv=None):
         # ignore log files
         cell_annot = [os.path.join(abs_path,
                                    an) for an in cell_files if not re.search(r"log", an)]
-        snp_annot = intersectSnpWithAnnotation(snp_bed=options.snp_bed,
-                                               annotation_bed=cell_annot[0],
-                                               snp_dict=snp_dict)
+        if len(cell_annot):
+            snp_annot = intersectSnpWithAnnotation(snp_bed=options.snp_bed,
+                                                   annotation_bed=cell_annot[0],
+                                                   snp_dict=snp_dict)
 
-        cell_df = pd.DataFrame(snp_annot)
-        cell_df["cell_type"] = cell
+            cell_df = pd.DataFrame(snp_annot)
+            cell_df["cell_type"] = cell
         
-        if counter == 0:
-            _df = cell_df
-            counter += 1
+            if counter == 0:
+                _df = cell_df
+                counter += 1
+            else:
+                _df = _df.append(cell_df)
+
         else:
-            _df = _df.append(cell_df)
+            pass
 
     # output in SNP position order and order headers
     # SNP first, then annotation
