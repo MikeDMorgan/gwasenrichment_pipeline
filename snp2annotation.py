@@ -263,7 +263,7 @@ def parseBedtools(bedout):
         if len(row):
             components = row.split("\t")
             snp_chr, snp_str, snp_end, snp_id = components[:4]
-            annot_chr, annot_str, annot_end, annot_name = components[4:]
+            annot_chr, annot_str, annot_end, annot_name = components[4:8]
         
             snp_dict["snp"].append(snp_id)
             snp_dict["chr"].append(snp_chr)
@@ -407,7 +407,7 @@ def main(argv=None):
     for cell in annots.keys():
         E.info("Intersecting SNPs with enriched annotations "
                "in {}".format(cell))
-        cell_re = re.compile(r"^{}.bed".format(cell))
+        cell_re = re.compile(r"^{}".format(cell))
         cell_files = [cx for cx in dirlist if re.match(cell_re, cx)]
 
         # ignore log files
